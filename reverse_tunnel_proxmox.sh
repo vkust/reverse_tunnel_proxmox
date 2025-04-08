@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Проверка прав root
 if [[ $EUID -ne 0 ]]; then
