@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # Проверка прав root
-if [[ $EUID -ne 0 ]]; then
+if [ "$EUID" -ne 0 ]; then
    echo "Этот скрипт должен быть запущен от имени root"
    exit 1
 fi
 
 # Установка autossh, если не установлен
-if ! command -v autossh &> /dev/null; then
+if ! command -v autossh >/dev/null 2>&1; then
     echo "Установка autossh..."
     apt-get update && apt-get install -y autossh
 fi
@@ -50,14 +50,14 @@ echo "Для локальной машины используйте 'localhost' 
 declare -A PORTS
 while true; do
     read -p "Введите перенаправление (или оставьте пустым для завершения): " INPUT
-    if [[ -z "$INPUT" ]]; then
+    if [ -z "$INPUT" ]; then
         break
     fi
     # Разбор строки формата <удаленный_порт>:<локальный_IP>:<локальный_порт>
     REMOTE_PORT=$(echo "$INPUT" | cut -d':' -f1)
     LOCAL_IP=$(echo "$INPUT" | cut -d':' -f2)
     LOCAL_PORT=$(echo "$INPUT" | cut -d':' -f3)
-    if [[ -z "$REMOTE_PORT" || -z "$LOCAL_IP" || -z "$LOCAL_PORT" ]]; then
+    if [ -z "$REMOTE_PORT" ] || [ -z "$LOCAL_IP" ] || [ -z "$LOCAL_PORT" ]; then
         echo "Неверный формат. Используйте <удаленный_порт>:<локальный_IP>:<локальный_порт>"
         continue
     fi
@@ -66,7 +66,7 @@ done
 
 # Создание файла туннеля
 TUNNEL_SCRIPT="/usr/local/bin/proxmox_tunnel.sh"
-cat > $TUNNEL_SCRIPT << EOL
+cat > "$TUNNEL_SCRIPT" << EOL
 #!/bin/bash
 
 # Параметры подключения
@@ -74,34 +74,43 @@ EXTERNAL_SERVER="root@$EXTERNAL_IP"
 SSH_PORT=$SSH_PORT
 CONFIG_FILE="/etc/proxmox_tunnel.conf"
 
+# Очистка переменной для аргументов
+PORT_ARGS=""
+
 # Чтение портов из конфигурационного файла
 if [ -f "\$CONFIG_FILE" ]; then
     while IFS=':' read -r REMOTE_PORT LOCAL_IP LOCAL_PORT; do
         # Пропускаем пустые строки и комментарии
-        if [[ -z "\$REMOTE_PORT" || "\$REMOTE_PORT" =~ ^# ]]; then
+        if [ -z "\$REMOTE_PORT" ] || echo "\$REMOTE_PORT" | grep -q "^#"; then
             continue
         fi
-        if [[ -n "\$REMOTE_PORT" && -n "\$LOCAL_IP" && -n "\$LOCAL_PORT" ]]; then
+        if [ -n "\$REMOTE_PORT" ] && [ -n "\$LOCAL_IP" ] && [ -n "\$LOCAL_PORT" ]; then
             PORT_ARGS="\$PORT_ARGS -R \$REMOTE_PORT:\$LOCAL_IP:\$LOCAL_PORT"
         fi
     done < "\$CONFIG_FILE"
 fi
 
-# Запуск autossh с параметрами для надежности
-eval "autossh -M 0 -f -N \\
-  -o \"ServerAliveInterval=60\" \\
-  -o \"ServerAliveCountMax=3\" \\
-  -o \"ExitOnForwardFailure=yes\" \\
+# Проверка, что есть перенаправления
+if [ -z "\$PORT_ARGS" ]; then
+    echo "Ошибка: нет валидных перенаправлений в \$CONFIG_FILE" >&2
+    exit 1
+fi
+
+# Запуск autossh без фонового режима
+exec autossh -M 0 -N \\
+  -o "ServerAliveInterval=60" \\
+  -o "ServerAliveCountMax=3" \\
+  -o "ExitOnForwardFailure=yes" \\
   \$PORT_ARGS \\
-  -p \$SSH_PORT \$EXTERNAL_SERVER"
+  -p "\$SSH_PORT" "\$EXTERNAL_SERVER"
 EOL
 
 # Делаем скрипт исполняемым
-chmod +x $TUNNEL_SCRIPT
+chmod +x "$TUNNEL_SCRIPT"
 
 # Создание конфигурационного файла
 CONFIG_FILE="/etc/proxmox_tunnel.conf"
-cat > $CONFIG_FILE << EOL
+cat > "$CONFIG_FILE" << EOL
 # Формат: <удаленный_порт>:<локальный_IP>:<локальный_порт>
 # Пример: 2222:192.168.1.10:22
 # Для локальной машины используйте localhost
@@ -110,12 +119,12 @@ for KEY in "${!PORTS[@]}"; do
     REMOTE=${PORTS[$KEY]}
     LOCAL_IP=$(echo "$KEY" | cut -d':' -f1)
     LOCAL_PORT=$(echo "$KEY" | cut -d':' -f2)
-    echo "$REMOTE:$LOCAL_IP:$LOCAL_PORT" >> $CONFIG_FILE
+    echo "$REMOTE:$LOCAL_IP:$LOCAL_PORT" >> "$CONFIG_FILE"
 done
 
 # Создание systemd сервиса
 SERVICE_FILE="/etc/systemd/system/proxmox-tunnel.service"
-cat > $SERVICE_FILE << EOL
+cat > "$SERVICE_FILE" << EOL
 [Unit]
 Description=Proxmox SSH Tunnel
 After=network.target
@@ -137,7 +146,7 @@ systemctl start proxmox-tunnel.service
 
 # Проверка статуса
 sleep 2
-if systemctl is-active proxmox-tunnel.service > /dev/null; then
+if systemctl is-active proxmox-tunnel.service >/dev/null 2>&1; then
     echo "Настройка завершена! Туннель запущен."
     echo "Проверьте подключение:"
     for KEY in "${!PORTS[@]}"; do
@@ -156,4 +165,5 @@ if systemctl is-active proxmox-tunnel.service > /dev/null; then
     echo "  systemctl restart proxmox-tunnel.service"
 else
     echo "Ошибка при запуске сервиса. Проверьте логи: journalctl -u proxmox-tunnel.service"
+    exit 1
 fi
