@@ -31,7 +31,11 @@ chmod 700 "${TUN_HOME}/.ssh"
 echo "[3/6] Генерация SSH-ключа (если нет)..."
 KEY_PATH="${TUN_HOME}/.ssh/${KEY_NAME}"
 if [[ ! -f "${KEY_PATH}" ]]; then
-  sudo -u "${TUN_USER}" ssh-keygen -t ed25519 -N "" -f "${KEY_PATH}"
+  echo "  Генерирую ключ для пользователя ${TUN_USER}..."
+  # Вариант 1: через runuser (предпочтительно на Debian/Proxmox)
+  runuser -u "${TUN_USER}" -- ssh-keygen -t ed25519 -N "" -f "${KEY_PATH}"
+  # Если по какой-то причине runuser нет, можно использовать:
+  # su -s /bin/bash "${TUN_USER}" -c "ssh-keygen -t ed25519 -N '' -f '${KEY_PATH}'"
 fi
 PUB_KEY="${KEY_PATH}.pub"
 
@@ -41,6 +45,7 @@ echo "-------------------------------------------------------------------"
 cat "${PUB_KEY}"
 echo "-------------------------------------------------------------------"
 echo
+
 
 # ==== ДИРЕКТОРИЯ КОНФИГОВ ====
 echo "[4/6] Создание директории конфигов ${CONF_DIR}..."
